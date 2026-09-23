@@ -1,0 +1,26 @@
+# Model search paths for a RunPod network volume.
+#
+# Serverless workers see the volume at /runpod-volume (Pods at /workspace).
+# This is a superset of the file shipped by the worker-comfyui base image: the
+# modern folder keys ComfyUI uses today (text_encoders, diffusion_models) plus
+# the legacy aliases it maps them to, so both layouts on the volume are found.
+#
+# Layout that src/ensure_models.py maintains on the volume:
+#   /runpod-volume/models/diffusion_models/<unet>.safetensors|gguf
+#   /runpod-volume/models/text_encoders/<encoder>.safetensors
+#   /runpod-volume/models/vae/<vae>.safetensors
+runpod_worker_comfy:
+  base_path: /runpod-volume
+  checkpoints: models/checkpoints/
+  configs: models/configs/
+  vae: models/vae/
+  loras: models/loras/
+  upscale_models: models/upscale_models/
+  embeddings: models/embeddings/
+  clip_vision: models/clip_vision/
+  controlnet: models/controlnet/
+  text_encoders: models/text_encoders/
+  clip: models/text_encoders/
+  diffusion_models: models/diffusion_models/
+  unet: models/diffusion_models/
+  model_patches: models/model_patches/

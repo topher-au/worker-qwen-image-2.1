@@ -1,0 +1,8 @@
+.git
+.gitignore
+.github
+README.md
+Makefile
+test_input.json
+**/__pycache__
+**/*.pyc

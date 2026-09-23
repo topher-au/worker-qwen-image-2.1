@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "Single source of truth for the models this worker needs.",
+    "'bake: true'  -> downloaded at image build time (small, never changes).",
+    "'bake: false' -> downloaded on the worker's first start (big; see README 'Model storage').",
+    "'dest' is relative to the ComfyUI models root (models/<dest>/<file>).",
+    "'size' is the upstream byte size, used as a sanity check only; the real expected",
+    "size is read from Hugging Face at download time, so a stale entry warns instead of failing."
+  ],
+  "models": [
+    {
+      "name": "qwen_image_2.1_vae_bf16.safetensors",
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "path": "vae/qwen_image_2.1_vae_bf16.safetensors",
+      "dest": "vae",
+      "size": 675509688,
+      "bake": true
+    },
+    {
+      "name": "qwen_image_2.1_Q6_K.gguf",
+      "repo": "AlperKTS/Qwen-Image-2.1-GGUF",
+      "path": "qwen_image_2.1_Q6_K.gguf",
+      "dest": "diffusion_models",
+      "size": 5836994752,
+      "bake": false,
+      "note": "Alternatives from the same repo: qwen_image_2.1_Q8_0.gguf (7624265888), qwen_image_2.1_Q5_K_M.gguf (4892053728)."
+    },
+    {
+      "name": "qwen3vl_8b_int8_convrot.safetensors",
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "path": "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+      "dest": "text_encoders",
+      "size": 9350798360,
+      "bake": false,
+      "note": "Alternatives from the same repo: qwen3vl_8b_w4a8.safetensors (6312105364), qwen3vl_8b_bf16.safetensors (17534334616)."
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "title": "ComfyUI Qwen-Image 2.1 (GGUF)",
+  "description": "Qwen-Image 2.1 on ComfyUI: GGUF diffusion model, Qwen3-VL 8B INT8 ConvRot text encoder, Comfy Kitchen attention. Attach a network volume for the model storage.",
+  "type": "serverless",
+  "category": "image",
+  "iconUrl": "https://cpjrphpz3t5wbwfe.public.blob.vercel-storage.com/comfy-ui.png",
+  "config": {
+    "runsOn": "GPU",
+    "containerDiskInGb": 20,
+    "gpuIds": "ADA_24",
+    "gpuCount": 1,
+    "allowedCudaVersions": ["13.0", "13.1", "13.2"],
+    "env": [
+      {
+        "key": "HF_TOKEN",
+        "input": {
+          "name": "Hugging Face token",
+          "type": "string",
+          "description": "Only needed for gated repos or to raise Hugging Face rate limits; the models used here are public",
+          "default": "",
+          "advanced": true
+        }
+      },
+      {
+        "key": "MODEL_STORAGE",
+        "input": {
+          "name": "Model storage",
+          "type": "string",
+          "description": "auto (network volume when mounted, else container), volume, or container",
+          "default": "auto",
+          "advanced": true
+        }
+      },
+      {
+        "key": "SKIP_MODEL_DOWNLOAD",
+        "input": {
+          "name": "Skip model download",
+          "type": "boolean",
+          "description": "Do not check or fetch any model on start (use when the volume is already populated)",
+          "default": false,
+          "advanced": true
+        }
+      },
+      {
+        "key": "MODEL_DOWNLOAD_STRICT",
+        "input": {
+          "name": "Strict model setup",
+          "type": "boolean",
+          "description": "Exit instead of starting when a model cannot be prepared (recommended)",
+          "default": true,
+          "advanced": true
+        }
+      },
+      {
+        "key": "COMFY_EXTRA_ARGS",
+        "input": {
+          "name": "Extra ComfyUI arguments",
+          "type": "string",
+          "description": "Arguments appended to ComfyUI's launch line",
+          "default": "--use-ck-attention",
+          "advanced": true
+        }
+      },
+      {
+        "key": "COMFY_LOG_LEVEL",
+        "input": {
+          "name": "ComfyUI log level",
+          "type": "string",
+          "description": "DEBUG, INFO, WARNING, ERROR or CRITICAL",
+          "default": "INFO",
+          "advanced": true
+        }
+      },
+      {
+        "key": "REFRESH_WORKER",
+        "input": {
+          "name": "Refresh worker",
+          "type": "boolean",
+          "description": "Stop the worker after each job for a clean state",
+          "default": false,
+          "advanced": true
+        }
+      },
+      {
+        "key": "COMFY_ORG_API_KEY",
+        "input": {
+          "name": "Comfy.org API key",
+          "type": "string",
+          "description": "Enables ComfyUI API Nodes",
+          "default": "",
+          "advanced": true
+        }
+      },
+      {
+        "key": "BUCKET_ENDPOINT_URL",
+        "input": {
+          "name": "S3 bucket endpoint URL",
+          "type": "string",
+          "description": "Upload images to S3 (e.g. https://<bucket>.s3.<region>.amazonaws.com)",
+          "default": "",
+          "advanced": true
+        }
+      },
+      {
+        "key": "BUCKET_ACCESS_KEY_ID",
+        "input": {
+          "name": "S3 access key ID",
+          "type": "string",
+          "description": "AWS access key ID (when S3 upload is enabled)",
+          "default": "",
+          "advanced": true
+        }
+      },
+      {
+        "key": "BUCKET_SECRET_ACCESS_KEY",
+        "input": {
+          "name": "S3 secret access key",
+          "type": "string",
+          "description": "AWS secret access key (when S3 upload is enabled)",
+          "default": "",
+          "advanced": true
+        }
+      }
+    ]
+  }
+}
