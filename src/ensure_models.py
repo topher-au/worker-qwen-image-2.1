@@ -131,10 +131,6 @@ def download(url: str, dest: str, token: str | None, expected: int | None) -> No
 
 def resolve(token: str | None, entry: dict, roots: list[str], dest_root: str) -> None:
     name, subdir = entry["name"], entry["dest"]
-    baked = bool(entry.get("bake", False))
-    if only_baked and not baked:
-        log(f"skipping {name} (not marked for baking)")
-        return
     present = [os.path.join(root, subdir, name) for root in roots]
     for path in present:
         if os.path.exists(path) and os.path.getsize(path) > 0:

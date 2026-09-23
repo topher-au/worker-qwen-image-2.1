@@ -55,21 +55,24 @@ RUN cd /comfyui \
  && grep -q "\"${COMFYUI_VERSION}\"" /comfyui/comfyui_version.py
 
 # ---------------------------------------------------------------------------
-# 2. Python deps, then PyTorch on CUDA 13.
+# 2. PyTorch on CUDA 13, then the rest of ComfyUI's dependencies.
 #    Comfy Kitchen's CUDA kernels come from cuBLAS 13, and comfy/quant_ops.py
 #    disables the CUDA backend outright when torch.version.cuda < 13 - which
-#    would make --use-ck-attention a hard startup failure and turn the INT8
-#    ConvRot text encoder into a slow pure-Python fallback.
-#    cu12 wheels left over from the base image are removed afterwards: they are
-#    several GB of dead weight once torch is cu13.
+#    would make --use-ck-attention a hard startup failure (attention.py calls
+#    exit(-1)) and turn the INT8 ConvRot text encoder into a slow pure-Python
+#    fallback. torch goes in first so requirements.txt (which declares a bare
+#    `torch`) never has a reason to download a second, cu12 build.
+#    cu12 wheels left over from the base image are removed afterwards: several
+#    GB of dead weight once torch is cu13.
 # ---------------------------------------------------------------------------
-RUN uv pip install --python "${VENV}/bin/python" -r /comfyui/requirements.txt \
- && uv pip install --python "${VENV}/bin/python" --force-reinstall \
+RUN uv pip install --python "${VENV}/bin/python" --force-reinstall \
       --index-url https://pypi.org/simple \
       --extra-index-url "${TORCH_INDEX_URL}" \
       "torch==${TORCH_VERSION}+cu130" \
       "torchvision==${TORCHVISION_VERSION}+cu130" \
       "torchaudio==${TORCHAUDIO_VERSION}+cu130" \
+ && uv pip install --python "${VENV}/bin/python" -r /comfyui/requirements.txt \
+ && uv pip install --python "${VENV}/bin/python" "transformers>=4.50.3,<5" "huggingface-hub<1.0" \
  && uv pip list --python "${VENV}/bin/python" --format freeze \
       | grep -Eo '^nvidia-[a-z0-9_-]+-cu12' | sort -u > /tmp/cu12-packages.txt || true \
  && if [ -s /tmp/cu12-packages.txt ]; then \

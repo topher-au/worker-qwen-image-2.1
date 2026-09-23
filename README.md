@@ -56,6 +56,13 @@ Workers sharing a volume serialise on an `flock`ed lock file; where the filesyst
 `flock` the atomic rename is still what keeps things consistent. Expected sizes come from
 Hugging Face (HEAD request), so a re-uploaded file warns instead of breaking a cold start.
 
+> **One caveat we could not verify from the outside:** the first start keeps the worker busy
+> for as long as the ~15 GB fetch takes (typically 1–4 min in a RunPod datacenter, longer
+> otherwise), before ComfyUI is up. If your endpoint reaps workers that are slow to report
+> healthy, populate the volume once (run a single worker with a network volume attached and
+> wait for `ensure-models: all models available` in its logs) and set
+> `SKIP_MODEL_DOWNLOAD=true`, or build with `BAKE_MODELS=true`.
+
 ---
 
 ## 2. CUDA 13 is required (the `--use-ck-attention` trap)
