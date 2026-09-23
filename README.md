@@ -55,13 +55,60 @@ mid-download never leaves a truncated file that ComfyUI would load and then cras
 Workers sharing a volume serialise on an `flock`ed lock file; where the filesystem has no
 `flock` the atomic rename is still what keeps things consistent. Expected sizes come from
 Hugging Face (HEAD request), so a re-uploaded file warns instead of breaking a cold start.
+A free-space check runs before every download and names the fix (volume / 40 GB container
+disk / `BAKE_MODELS=true`) instead of dying on `ENOSPC`.
 
-> **One caveat we could not verify from the outside:** the first start keeps the worker busy
-> for as long as the ~15 GB fetch takes (typically 1–4 min in a RunPod datacenter, longer
-> otherwise), before ComfyUI is up. If your endpoint reaps workers that are slow to report
-> healthy, populate the volume once (run a single worker with a network volume attached and
-> wait for `ensure-models: all models available` in its logs) and set
-> `SKIP_MODEL_DOWNLOAD=true`, or build with `BAKE_MODELS=true`.
+---
+
+## 1b. Cold-boot cost: exactly what gets downloaded
+
+| Cold boot | Bytes fetched | Where from |
+| --- | --- | --- |
+| First start of the endpoint with a network volume attached | **15.19 GB** — `qwen_image_2.1_Q6_K.gguf` (5.84 GB) + `qwen3vl_8b_int8_convrot.safetensors` (9.35 GB) | Hugging Face → `/runpod-volume/models/…` |
+| Any later worker / cold boot on that endpoint | **0 bytes** | log says `present: /runpod-volume/models/…` |
+| Same host, but no network volume (container storage) | 15.19 GB **every** cold boot (writable layer is discarded) | Hugging Face → `/comfyui/models/…` |
+| Any boot with `BAKE_MODELS=true` image | **0 bytes, ever** | read from the image's own layers |
+
+The VAE (0.68 GB) is never fetched — it is in the image. Nothing else is downloaded:
+ComfyUI's node packs, the frontend, `comfy-kitchen` and the models above are the whole list.
+Run `python3 /ensure_models.py --manifest /models.json --dest-root /comfyui/models --check`
+in a running worker to see the current state (`ok` / `cached` / `MISSING` per file).
+
+Three ways to make that first start cheap or free, best first for this stack:
+
+1. **Network volume (default, already wired up).** One-time 15.19 GB, then zero downloads.
+   Standard tier is **$0.07/GB/month** (50 GB ≈ $3.50/mo), NVMe-backed at 200–400 MB/s
+   typical (up to 10 GB/s peak), so the *first inference of each new worker* spends ~40–80 s
+   reading the weights off the volume. Trade-off: the endpoint is pinned to the volume's
+   datacenter (attach one volume per DC to widen the pool; data does not sync automatically).
+   Writing from several workers at once can corrupt data — that is what the `flock` in
+   `src/ensure_models.py` is for.
+
+2. **RunPod "cached models"** (Serverless → *Model* field, one Hugging Face repo per
+   endpoint). RunPod pre-downloads the repo onto the host's local disk **before** the worker
+   starts, does **not bill** for that download, and prefers scheduling workers onto hosts
+   that already hold it — the fastest cold start available. It lands in HF cache layout at
+   `/runpod-volume/huggingface-cache/hub/models--<org>--<name>/snapshots/<hash>/…`, which is
+   *not* where ComfyUI looks; `src/ensure_models.py` recognises that layout and links the
+   file into `models/diffusion_models/` (set `MODEL_CACHE_MODE=copy` to materialise a real
+   file, `off` to ignore the cache). Configuration that works well here:
+
+   | Cached model repo | What RunPod pulls | Verdict |
+   | --- | --- | --- |
+   | `AlperKTS/Qwen-Image-2.1-GGUF` | all three quants, 18.4 GB | **use this** — the 5.84 GB GGUF you need, host-local |
+   | `Comfy-Org/Qwen-Image-2.1` | every file in the repo, **74.3 GB** (bf16 + int8 + w4a8 + both prompt-enhancer models) | avoid — the repo cannot be narrowed down |
+
+   With the GGUF repo cached, only the 9.35 GB text encoder still comes from the volume.
+   Note the limit: **one cached model per endpoint**, and the whole repo is downloaded.
+
+3. **Bake everything** (`--build-arg BAKE_MODELS=true` + `containerDiskInGb: 40`).
+   Zero runtime download and reads come off local NVMe, at the cost of a ~30.5 GB image
+   (slower host image pulls, no quant swapping without a rebuild).
+
+Also worth setting: RunPod marks a worker **unhealthy if the cold start exceeds 7 minutes**
+(`RUNPOD_INIT_TIMEOUT=800` extends it) — relevant only for the no-volume case, where the
+first start also re-downloads. And `active workers ≥ 1` removes cold starts entirely, at the
+cost of an always-on worker.
 
 ---
 
@@ -164,6 +211,9 @@ The build ends with two safety nets: ComfyUI's own `--quick-test-for-ci --cpu` s
 | `SKIP_MODEL_DOWNLOAD` | `false` | skip all model checks (volume pre-populated) |
 | `MODEL_DOWNLOAD_STRICT` | `true` | exit instead of serving with missing models |
 | `MODEL_DOWNLOAD_RETRIES` | `5` | download attempts per file |
+| `MODEL_CACHE_MODE` | `link` | use RunPod cached models: `link` \| `copy` \| `off` |
+| `HF_CACHE_ROOT` | `/runpod-volume/huggingface-cache/hub` | where cached models are staged |
+| `RUNPOD_INIT_TIMEOUT` | – | seconds before an unfinished cold start is marked unhealthy (set `800` when fetching without a volume) |
 | `COMFY_EXTRA_ARGS` | `--use-ck-attention` | extra flags for `main.py` |
 | `COMFY_LOG_LEVEL` | `DEBUG` (upstream) | ComfyUI verbosity |
 | `REFRESH_WORKER`, `BUCKET_*`, `COMFY_ORG_API_KEY`, `SERVE_API_LOCALLY` | upstream defaults | see worker-comfyui's configuration docs |
@@ -218,7 +268,9 @@ Both reference the same three model files the manifest installs, so they run unm
 | Worker dies with "Comfy Kitchen attention is unavailable" | the worker landed on a CUDA 12.x host, or the image was rebuilt with a cu12 torch. Restrict `allowedCudaVersions` to 13.x |
 | `no kernel image is available` / CUDA init failure | driver older than 580 on the host; same fix |
 | Worker exits during startup with "model setup failed" | download failed (network/disk). `MODEL_DOWNLOAD_STRICT=false` starts anyway; check free space with the container-disk note above |
-| `ENOSPC` while downloading | container disk too small for the container-local layout; attach a network volume |
+| `not enough space in /comfyui/models` | the container-local layout cannot hold the models — attach a network volume, raise the container disk to 40 GB, or build with `BAKE_MODELS=true` |
+| Cached model configured but the worker still downloads | check the repo is on the endpoint's *Model* field (one per endpoint) and that the log line `linked cached model:` appears; `MODEL_CACHE_MODE=off` disables the lookup |
+| Cold start killed as unhealthy | fetch without a volume takes longer than RunPod's 7-minute cold-start budget — set `RUNPOD_INIT_TIMEOUT=800` or use a volume |
 | `Model in folder 'text_encoders' ... not found` | the volume lacks the file — let the entrypoint fetch it (`SKIP_MODEL_DOWNLOAD=false`), or check the layout in §4 |
 | Models on the volume invisible | set `NETWORK_VOLUME_DEBUG=true` (upstream diagnostic) and compare with §4; only `/runpod-volume/models/...` is searched |
 
@@ -233,6 +285,7 @@ src/ensure_models.py           idempotent, resumable, atomic model fetcher (stdl
 src/custom-start.sh            entrypoint: prepare models, then run the upstream /start.sh
 src/extra_model_paths.yaml     network-volume search paths (modern + legacy folder keys)
 src/verify_image.py            build-time assertions
+tests/test_ensure_models.py    local harness: download, resume, cache adoption, storage guard
 workflows/*_api.json           API-format workflows for the API
 test_input.json                ready-to-post request body
 .runpod/hub.json               RunPod template definition (disks, GPUs, CUDA, env)

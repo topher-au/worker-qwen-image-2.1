@@ -52,6 +52,26 @@
         }
       },
       {
+        "key": "MODEL_CACHE_MODE",
+        "input": {
+          "name": "Use RunPod cached models",
+          "type": "string",
+          "description": "link | copy | off - adopt files staged by the endpoint's cached model instead of downloading them",
+          "default": "link",
+          "advanced": true
+        }
+      },
+      {
+        "key": "RUNPOD_INIT_TIMEOUT",
+        "input": {
+          "name": "Cold start timeout (s)",
+          "type": "number",
+          "description": "Seconds before an unfinished cold start is marked unhealthy (RunPod default 420); raise to 800 when the first start has to fetch models",
+          "default": 800,
+          "advanced": true
+        }
+      },
+      {
         "key": "COMFY_EXTRA_ARGS",
         "input": {
           "name": "Extra ComfyUI arguments",

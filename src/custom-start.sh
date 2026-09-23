@@ -55,6 +55,11 @@ else
     log "model storage: ${dest}"
 fi
 
+if [ -d "${VOLUME_PATH}/huggingface-cache" ]; then
+    log "found a RunPod model cache at ${VOLUME_PATH}/huggingface-cache - files staged there"
+    log "are reused instead of downloaded (MODEL_CACHE_MODE=${MODEL_CACHE_MODE:-link})"
+fi
+
 mkdir -p "${dest}"
 
 python3 -u /ensure_models.py \

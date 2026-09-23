@@ -23,6 +23,7 @@ check:
 	python3 -c "import json;[json.load(open(f)) for f in ('models.json','test_input.json','.runpod/hub.json','workflows/qwen_image_2_1_gguf_t2i_api.json','workflows/qwen_image_2_1_gguf_edit_api.json')];print('json ok')"
 	bash -n src/custom-start.sh && echo "shell ok"
 	python3 -m py_compile src/ensure_models.py src/verify_image.py && echo "python ok"
+	python3 tests/test_ensure_models.py
 
 shell:
 	docker run --rm -it --entrypoint /bin/bash $(REGISTRY)/$(IMAGE):$(TAG)

@@ -9,6 +9,10 @@ Used twice, from the same manifest (models.json):
 
 Design notes
 ------------
+* A file already staged by RunPod's *cached models* feature is reused instead of
+  downloaded: those land in the Hugging Face cache layout under
+  /runpod-volume/huggingface-cache/hub, and ``adopt()`` links (or copies) them
+  into ComfyUI's model directories, so the host-local copy is what gets read.
 * ``.part`` staging + ``os.replace()``: the rename is atomic on one filesystem,
   so a worker that dies mid-download never leaves a truncated file that ComfyUI
   would happily mmap and then crash on.
@@ -29,6 +33,7 @@ import argparse
 import fcntl
 import json
 import os
+import shutil
 import sys
 import time
 import urllib.error
@@ -39,6 +44,11 @@ HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/"
 LOCK_TIMEOUT_S = float(os.environ.get("MODEL_LOCK_TIMEOUT_S", "1800"))
 RETRIES = int(os.environ.get("MODEL_DOWNLOAD_RETRIES", "5"))
 LOCK_WAIT_S = float(os.environ.get("MODEL_LOCK_WAIT_S", "3600"))
+# RunPod's "cached models" feature stages whole Hugging Face repos here, on the
+# host's local disk, before the worker starts. Using them avoids the download
+# entirely - see README "Cold-boot cost".
+CACHE_MODE = os.environ.get("MODEL_CACHE_MODE", "link")  # link | copy | off
+HF_CACHE_ROOT = os.environ.get("HF_CACHE_ROOT", "/runpod-volume/huggingface-cache/hub")
 
 
 def log(msg: str) -> None:
@@ -129,6 +139,66 @@ def download(url: str, dest: str, token: str | None, expected: int | None) -> No
     raise RuntimeError(f"could not download {url} -> {dest}")
 
 
+def cached_candidates(entry: dict) -> list[str]:
+    """Files already staged on this host by RunPod's cached-models feature.
+
+    RunPod unpacks a cached Hugging Face repo into the standard HF cache layout
+    under /runpod-volume/huggingface-cache/hub, with slashes in the repo name
+    replaced by "--" and one directory per revision:
+
+        models--<org>--<name>/snapshots/<hash>/<path inside the repo>
+
+    Returns the matching paths (newest snapshot last), or [] when the repo is
+    not cached on this host.
+    """
+    if CACHE_MODE == "off":
+        return []
+    snapshots = os.path.join(HF_CACHE_ROOT, "models--" + entry["repo"].replace("/", "--"), "snapshots")
+    if not os.path.isdir(snapshots):
+        return []
+    hits = []
+    for snap in sorted(os.listdir(snapshots)):
+        path = os.path.join(snapshots, snap, entry["path"])
+        if os.path.isfile(path):
+            hits.append(path)
+    return hits
+
+
+def ensure_space(root: str, need: int) -> None:
+    """Fail early, with an actionable message, instead of dying on ENOSPC."""
+    try:
+        free = shutil.disk_usage(root).free
+    except OSError:
+        return
+    if free < need * 1.05:
+        raise RuntimeError(
+            f"not enough space in {root}: {human(free)} free, {human(need)} needed. "
+            "Attach a network volume (models land on /runpod-volume/models), raise the "
+            "container disk to 40 GB, or bake the models into the image (BAKE_MODELS=true)."
+        )
+
+
+def adopt(src: str, dest: str) -> None:
+    """Make a cached file usable from ComfyUI's model directories."""
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if os.path.islink(dest) or os.path.exists(dest):
+        os.remove(dest)
+    size = os.path.getsize(src)
+    if CACHE_MODE == "copy":
+        ensure_space(os.path.dirname(dest), size)
+        shutil.copy2(src, dest)
+        log(f"copied cached model: {src} -> {dest} ({human(size)})")
+        return
+    try:
+        os.symlink(src, dest)
+        log(f"linked cached model: {dest} -> {src} ({human(size)})")
+    except OSError as exc:  # filesystem without symlinks: fall back to a copy
+        log(f"note: symlink failed ({exc}), copying instead")
+        ensure_space(os.path.dirname(dest), size)
+        shutil.copy2(src, dest)
+        log(f"copied cached model: {src} -> {dest} ({human(size)})")
+
+
 def resolve(token: str | None, entry: dict, roots: list[str], dest_root: str) -> None:
     name, subdir = entry["name"], entry["dest"]
     present = [os.path.join(root, subdir, name) for root in roots]
@@ -139,12 +209,19 @@ def resolve(token: str | None, entry: dict, roots: list[str], dest_root: str) ->
                 log(f"  (using the copy that is already on disk instead of {dest_root})")
             return
     dest = os.path.join(dest_root, subdir, name)
+    cached = cached_candidates(entry)
+    if cached:
+        adopt(cached[-1], dest)
+        return
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     url = f"{HF_ENDPOINT}/{entry['repo']}/resolve/main/{entry['path']}?download=true"
     size = remote_size(url, token)
     declared = entry.get("size")
     if size and declared and size != declared:
         log(f"warning: {name} is {size} bytes upstream, manifest says {declared} - update models.json")
+    need = size or declared or 0
+    if need:
+        ensure_space(os.path.dirname(dest), need)
     download(url, dest, token, size or declared)
 
 
@@ -171,9 +248,14 @@ def main() -> int:
         missing = 0
         for e in entries:
             path = os.path.join(args.dest_root, e["dest"], e["name"])
-            ok = os.path.exists(path)
-            missing += 0 if ok else 1
-            log(f"{'ok     ' if ok else 'MISSING'} {path}")
+            cached = cached_candidates(e)
+            if os.path.exists(path):
+                log(f"ok      {path}")
+            elif cached:
+                log(f"cached  {path} (usable from {cached[-1]})")
+            else:
+                missing += 1
+                log(f"MISSING {path}")
         return 1 if missing else 0
 
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
