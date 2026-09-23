@@ -1,16 +1,16 @@
 {
   "1": {
     "inputs": {
-      "unet_name": "qwen_image_2.1_Q6_K.gguf"
+      "unet_name": "qwen_image_2.1_bf16.safetensors"
     },
-    "class_type": "UnetLoaderGGUF",
+    "class_type": "UNETLoader",
     "_meta": {
-      "title": "Unet Loader (GGUF)"
+      "title": "Load Diffusion Model (Qwen-Image 2.1 bf16)"
     }
   },
   "2": {
     "inputs": {
-      "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+      "clip_name": "qwen3vl_8b_bf16.safetensors",
       "type": "qwen_image",
       "device": "default"
     },
@@ -21,7 +21,7 @@
   },
   "3": {
     "inputs": {
-      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+      "vae_name": "qwen_image_2.1_vae_fp32.safetensors"
     },
     "class_type": "VAELoader",
     "_meta": {
@@ -30,35 +30,28 @@
   },
   "4": {
     "inputs": {
-      "image": "input_image_1.png",
-      "upload": "image"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image (reference)"
-    }
-  },
-  "5": {
-    "inputs": {
       "clip": [
         "2",
         0
       ],
-      "vae": [
-        "3",
-        0
-      ],
-      "prompt": "Replace the background with a snowy mountain range at dusk, keep the subject and lighting unchanged",
+      "prompt": "A neon shop sign that reads \"QWEN IMAGE 2.1\", rainy night, reflections on wet pavement",
       "negative_prompt": "",
-      "resolution": 1024,
-      "images.image_1": [
-        "4",
-        0
-      ]
+      "resolution": 1024
     },
     "class_type": "TextEncodeQwenImage21",
     "_meta": {
-      "title": "Text Encode Qwen Image 2.1 (edit)"
+      "title": "Text Encode Qwen Image 2.1"
+    }
+  },
+  "5": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
     }
   },
   "6": {
@@ -74,16 +67,16 @@
         0
       ],
       "positive": [
-        "5",
+        "4",
         0
       ],
       "negative": [
-        "5",
+        "4",
         1
       ],
       "latent_image": [
         "5",
-        2
+        0
       ]
     },
     "class_type": "KSampler",
@@ -109,7 +102,7 @@
   },
   "8": {
     "inputs": {
-      "filename_prefix": "qwen_image_2.1_edit",
+      "filename_prefix": "qwen_image_2.1",
       "images": [
         "7",
         0

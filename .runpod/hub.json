@@ -1,6 +1,6 @@
 {
-  "title": "ComfyUI Qwen-Image 2.1 (GGUF)",
-  "description": "Qwen-Image 2.1 on ComfyUI: GGUF diffusion model, Qwen3-VL 8B INT8 ConvRot text encoder, Comfy Kitchen attention. Attach a network volume for the model storage.",
+  "title": "ComfyUI Qwen-Image 2.1",
+  "description": "Qwen-Image 2.1 on ComfyUI, built from the original Qwen/Qwen-Image-2.1 weights: the diffusers shards are converted (merged, renamed, SwiGLU-fused) into ComfyUI checkpoints on first start. Comfy Kitchen INT8 attention, baked node packs, network-volume aware. Set the endpoint's cached model to Qwen/Qwen-Image-2.1 so the 30 GB of source shards are read from the host cache instead of downloaded.",
   "type": "serverless",
   "category": "image",
   "iconUrl": "https://cpjrphpz3t5wbwfe.public.blob.vercel-storage.com/comfy-ui.png",
@@ -9,7 +9,11 @@
     "containerDiskInGb": 20,
     "gpuIds": "ADA_24",
     "gpuCount": 1,
-    "allowedCudaVersions": ["13.0", "13.1", "13.2"],
+    "allowedCudaVersions": [
+      "13.0",
+      "13.1",
+      "13.2"
+    ],
     "env": [
       {
         "key": "HF_TOKEN",
@@ -76,8 +80,18 @@
         "input": {
           "name": "Extra ComfyUI arguments",
           "type": "string",
-          "description": "Arguments appended to ComfyUI's launch line",
-          "default": "--use-ck-attention",
+          "description": "Extra flags appended to ComfyUI's launch line. CK attention is already on (see CK_ATTENTION)",
+          "default": "",
+          "advanced": true
+        }
+      },
+      {
+        "key": "CK_ATTENTION",
+        "input": {
+          "name": "Comfy Kitchen attention",
+          "type": "boolean",
+          "description": "Start ComfyUI with --use-ck-attention (needs the CUDA 13 build; set false only on a cu12 torch build)",
+          "default": true,
           "advanced": true
         }
       },

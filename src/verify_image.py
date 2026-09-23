@@ -59,6 +59,26 @@ def main() -> int:
     check(os.path.exists("/comfyui/extra_model_paths.yaml"), "network-volume model paths installed")
     check(os.access("/custom-start.sh", os.X_OK), "/custom-start.sh is executable")
 
+    # All three checkpoints are converted from the original Qwen repository at
+    # first start, so the converter has to be installed next to the fetcher.
+    sys.path.insert(0, "/")
+    try:
+        import safetensors_convert
+
+        check(all(hasattr(safetensors_convert, n) for n in ("convert", "output_matches", "read_header")),
+              "safetensors_convert is installed for the first-start conversion")
+    except Exception as exc:  # pragma: no cover
+        check(False, f"safetensors_convert importable ({exc})")
+
+    # The entrypoint is vendored from the base repo (see src/start.sh): whatever
+    # else changes in it, the CK attention wiring has to survive.
+    with open("/start.sh") as fh:
+        start_sh = fh.read()
+    check('CK_ATTENTION_ARG="--use-ck-attention"' in start_sh,
+          "/start.sh starts ComfyUI with --use-ck-attention by default")
+    check(start_sh.count("${CK_ATTENTION_ARG} ${COMFY_EXTRA_ARGS:-}") == 2,
+          "/start.sh passes the CK attention + extra args to both ComfyUI launch lines")
+
     with open(args.manifest) as fh:
         manifest = json.load(fh)
     baked_expected = 0

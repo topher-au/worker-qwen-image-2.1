@@ -6,7 +6,7 @@
 # the legacy aliases it maps them to, so both layouts on the volume are found.
 #
 # Layout that src/ensure_models.py maintains on the volume:
-#   /runpod-volume/models/diffusion_models/<unet>.safetensors|gguf
+#   /runpod-volume/models/diffusion_models/qwen_image_2.1_bf16.safetensors
 #   /runpod-volume/models/text_encoders/<encoder>.safetensors
 #   /runpod-volume/models/vae/<vae>.safetensors
 runpod_worker_comfy:

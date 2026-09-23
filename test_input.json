@@ -3,16 +3,16 @@
     "workflow": {
       "1": {
         "inputs": {
-          "unet_name": "qwen_image_2.1_Q6_K.gguf"
+          "unet_name": "qwen_image_2.1_bf16.safetensors"
         },
-        "class_type": "UnetLoaderGGUF",
+        "class_type": "UNETLoader",
         "_meta": {
-          "title": "Unet Loader (GGUF)"
+          "title": "Load Diffusion Model (Qwen-Image 2.1 bf16)"
         }
       },
       "2": {
         "inputs": {
-          "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+          "clip_name": "qwen3vl_8b_bf16.safetensors",
           "type": "qwen_image",
           "device": "default"
         },
@@ -23,7 +23,7 @@
       },
       "3": {
         "inputs": {
-          "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+          "vae_name": "qwen_image_2.1_vae_fp32.safetensors"
         },
         "class_type": "VAELoader",
         "_meta": {

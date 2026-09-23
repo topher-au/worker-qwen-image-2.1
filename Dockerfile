@@ -5,7 +5,7 @@
 #
 #   * latest ComfyUI (pinned, currently 0.37.1) with Comfy Kitchen attention
 #   * ComfyUI-Easy-Use, rgthree-comfy, ComfyUI-KJNodes, ComfyUI-GGUF baked in
-#   * Qwen-Image 2.1 GGUF diffusion model + Qwen3-VL 8B text encoder + VAE
+#   * Qwen-Image 2.1 (original Qwen/Qwen-Image-2.1 weights) + Qwen3-VL 8B text encoder + VAE
 #
 # See README.md for the model-storage decisions (what is baked, what is fetched
 # at first start, why) and the CUDA 13 / --use-ck-attention requirement.
@@ -15,6 +15,9 @@ ARG BASE_IMAGE=runpod/worker-comfyui:5.10.0-base
 FROM ${BASE_IMAGE}
 
 # --- versions / build knobs -------------------------------------------------
+# BASE_IMAGE is declared before FROM (for the FROM line itself) and re-declared
+# here so it is visible to RUN/ENV steps - the start.sh drift check prints it.
+ARG BASE_IMAGE
 ARG COMFYUI_VERSION=0.37.1
 ARG TORCH_VERSION=2.11.0
 ARG TORCHVISION_VERSION=0.26.0
@@ -28,10 +31,13 @@ ARG REMOVE_WORKSPACE_VENV=false
 ENV VENV=/opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV COMFYUI_VERSION=${COMFYUI_VERSION}
-# Comfy Kitchen INT8 attention becomes the global attention path. It requires a
-# Comfy Kitchen build with CUDA support (torch cu13+), otherwise ComfyUI exits
-# with "Comfy Kitchen attention is unavailable" at startup.
-ENV COMFY_EXTRA_ARGS="--use-ck-attention"
+# Comfy Kitchen INT8 attention: src/start.sh (vendored from the base repo and
+# installed as /start.sh) launches ComfyUI with --use-ck-attention unless
+# CK_ATTENTION=false. It requires a Comfy Kitchen build with CUDA support
+# (torch cu13+), otherwise ComfyUI exits with "Comfy Kitchen attention is
+# unavailable" at startup. COMFY_EXTRA_ARGS appends further flags.
+ENV CK_ATTENTION=true
+ENV COMFY_EXTRA_ARGS=""
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
@@ -101,11 +107,17 @@ RUN comfy-node-install ${NODE_PACKAGES} \
 
 # ---------------------------------------------------------------------------
 # 4. Models
-#    Small and never-changing files are baked now; the multi-GB ones are left
-#    to the runtime fetcher (src/ensure_models.py) unless BAKE_MODELS=true.
+#    The worker builds all three checkpoints itself from the original
+#    Qwen/Qwen-Image-2.1 repository (diffusers layout) with
+#    src/safetensors_convert.py: shard merge, key renames, row-order fusion of
+#    the SwiGLU FFN, and the unit axes the WanVAE decoder expects. Nothing is
+#    baked by default (33 GB of output); at first start the fetcher reads the
+#    source shards from RunPod's cached-model store and converts them onto the
+#    network volume. Set BAKE_MODELS=true to do it at build time instead.
 # ---------------------------------------------------------------------------
 COPY models.json /models.json
 COPY src/ensure_models.py /ensure_models.py
+COPY src/safetensors_convert.py /safetensors_convert.py
 RUN if [ "${BAKE_MODELS}" = "true" ]; then \
       python3 -u /ensure_models.py --manifest /models.json --dest-root /comfyui/models --all; \
     else \
@@ -125,12 +137,38 @@ COPY src/extra_model_paths.yaml /comfyui/extra_model_paths.yaml
 COPY src/custom-start.sh /custom-start.sh
 RUN chmod +x /custom-start.sh
 
-# The upstream entrypoint launches ComfyUI with a fixed argument list. Splice in
-# an env-driven hook so COMFY_EXTRA_ARGS (default --use-ck-attention) reaches
-# main.py, without forking the whole script. The assertion below fails the build
-# if upstream ever changes those lines.
-RUN sed -i 's|python -u /comfyui/main.py --disable-auto-launch|python -u /comfyui/main.py ${COMFY_EXTRA_ARGS:-} --disable-auto-launch|g' /start.sh \
- && [ "$(grep -c 'COMFY_EXTRA_ARGS' /start.sh)" -eq 2 ]
+# The worker entrypoint is vendored from the base repository into src/start.sh.
+# Two local changes, both visible in that file: a CK_ATTENTION block that starts
+# ComfyUI with --use-ck-attention, and ${COMFY_EXTRA_ARGS:-} on the launch lines
+# for extra flags. Re-import after a BASE_IMAGE bump:  make sync-start-sh REF=<tag>
+#
+# The vendored file is installed as /start.sh. The checks below fail the build if
+# the vendored file lost that wiring, and print a reviewable diff (without
+# failing) when the base image's own /start.sh has drifted in some other way.
+COPY src/start.sh /start.sh.vendored
+RUN set -euo pipefail; \
+    bash -n /start.sh.vendored; \
+    [ "$(grep -c -F 'CK_ATTENTION_ARG="--use-ck-attention"' /start.sh.vendored)" -eq 1 ]; \
+    [ "$(grep -c -F '${CK_ATTENTION_ARG}' /start.sh.vendored)" -eq 2 ]; \
+    [ "$(grep -c -F '${COMFY_EXTRA_ARGS:-}' /start.sh.vendored)" -eq 2 ]; \
+    if ! grep -q -F 'python -u /comfyui/main.py' /start.sh; then \
+      echo "ERROR: ${BASE_IMAGE} /start.sh does not look like the worker entrypoint" >&2; \
+      echo "       this repo vendors; re-import with:" >&2; \
+      echo "         make sync-start-sh REF=<tag of ${BASE_IMAGE}>" >&2; \
+      exit 1; \
+    fi; \
+    sed -e '/^# Enable Comfy Kitchen INT8 attention/,/^esac$/d' \
+        -e 's|python -u /comfyui/main.py ${CK_ATTENTION_ARG} ${COMFY_EXTRA_ARGS:-} --disable-auto-launch|python -u /comfyui/main.py --disable-auto-launch|g' \
+        /start.sh.vendored > /tmp/start.sh.unpatched; \
+    if ! diff -q /tmp/start.sh.unpatched /start.sh > /dev/null; then \
+      echo "WARNING: ${BASE_IMAGE} /start.sh differs from src/start.sh minus the local" >&2; \
+      echo "         changes (base image may have moved since the vendored copy):" >&2; \
+      diff -u /tmp/start.sh.unpatched /start.sh | head -40 >&2 || true; \
+      echo "         the vendored src/start.sh is what gets installed; refresh with" >&2; \
+      echo "         make sync-start-sh REF=<tag of ${BASE_IMAGE}>" >&2; \
+    fi; \
+    install -m 0755 /start.sh.vendored /start.sh; \
+    rm -f /start.sh.vendored /tmp/start.sh.unpatched
 
 # Optional: drop comfy-cli's own workspace venv (a second copy of torch, ~6 GB).
 # Only do this if you never run comfy-cli commands inside a derived image.

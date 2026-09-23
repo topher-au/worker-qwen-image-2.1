@@ -113,7 +113,8 @@ check(p.returncode != 0 and not os.path.exists(link),
       "MODEL_CACHE_MODE=off ignores the cache (download fails without a route)")
 
 p = run(f"{ROOT}/cached.json", f"{ROOT}/cache2", "--check")
-check(p.returncode == 0 and "cached" in p.stdout, "--check recognises a cached-only file")
+check(p.returncode == 1 and "MISSING" in p.stdout and "(usable from" in p.stdout,
+      "--check names the model cache when a file is cached but not yet adopted")
 
 # --- storage guard ----------------------------------------------------------
 # HEAD fails for the missing path, so the declared (absurd) size is what the

@@ -1,38 +1,139 @@
 {
   "_comment": [
     "Single source of truth for the models this worker needs.",
-    "'bake: true'  -> downloaded at image build time (small, never changes).",
-    "'bake: false' -> downloaded on the worker's first start (big; see README 'Model storage').",
-    "'dest' is relative to the ComfyUI models root (models/<dest>/<file>).",
-    "'size' is the upstream byte size, used as a sanity check only; the real expected",
-    "size is read from Hugging Face at download time, so a stale entry warns instead of failing."
+    "",
+    "Every entry is converted from the ORIGINAL Qwen repository (Qwen/Qwen-Image-2.1)",
+    "into the single-file, ComfyUI-named checkpoint that ComfyUI can load. The sources",
+    "are diffusers-format shards; 'convert' describes how they are turned into one file",
+    "(see src/safetensors_convert.py). Nothing is recomputed - keys are renamed, tensors",
+    "are copied (and concatenated for ComfyUI's fused SwiGLU FFN), so the weights are the",
+    "upstream weights.",
+    "",
+    "'expect' is what the OUTPUT must look like: tensor count, dtype, tensor bytes and a",
+    "sha256 of the sorted 'key|shape' listing. The conversion is refused unless it matches,",
+    "so no exact offsets or raw weights are stored in this repository.",
+    "",
+    "'output_bytes' drives the free-space preflight; 'bake' is unused here (the models are",
+    "built on the worker's first start, from the RunPod model cache or Hugging Face).",
+    "",
+    "Cold start: set the endpoint's cached model to Qwen/Qwen-Image-2.1. RunPod then stages",
+    "the whole repo in the host's local HF cache, and src/ensure_models.py reads the shards",
+    "from there in place - no download, and no second copy of the 33 GB."
   ],
+  "worker": {
+    "models_root": "/comfyui/models",
+    "converter": "src/safetensors_convert.py"
+  },
   "models": [
     {
-      "name": "qwen_image_2.1_vae_bf16.safetensors",
-      "repo": "Comfy-Org/Qwen-Image-2.1",
-      "path": "vae/qwen_image_2.1_vae_bf16.safetensors",
-      "dest": "vae",
-      "size": 675509688,
-      "bake": true
-    },
-    {
-      "name": "qwen_image_2.1_Q6_K.gguf",
-      "repo": "AlperKTS/Qwen-Image-2.1-GGUF",
-      "path": "qwen_image_2.1_Q6_K.gguf",
+      "name": "qwen_image_2.1_bf16.safetensors",
       "dest": "diffusion_models",
-      "size": 5836994752,
-      "bake": false,
-      "note": "Alternatives from the same repo: qwen_image_2.1_Q8_0.gguf (7624265888), qwen_image_2.1_Q5_K_M.gguf (4892053728)."
+      "repo": "Qwen/Qwen-Image-2.1",
+      "sources": [
+        "transformer/diffusion_pytorch_model-00001-of-00002.safetensors",
+        "transformer/diffusion_pytorch_model-00002-of-00002.safetensors"
+      ],
+      "index": {
+        "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+        "total_size": 14230249472
+      },
+      "output_bytes": 14230249472,
+      "convert": {
+        "fuse": [
+          {
+            "pattern": "^(?P<base>.+)\\.img_mlp\\.gate_layer\\.weight$",
+            "with": "${base}.img_mlp.proj.weight",
+            "into": "${base}.img_mlp.gate_up.weight",
+            "axis": 0
+          }
+        ],
+        "expect": {
+          "tensors": 265,
+          "dtype": "BF16",
+          "data_bytes": 14230249472,
+          "layout_sha256": "e8585f9dac243ab00575f1be19305a6c8d391d403531c3f53cd58eaf9e598dda"
+        }
+      },
+      "provenance": "ComfyUI's qwen_image21 FFN is a fused SwiGLU (img_mlp.gate_up + img_mlp.out); the original repo ships img_mlp.gate_layer + img_mlp.proj, which are the two halves in row order. Concatenating them was verified byte-identical to Comfy-Org's repackage for blocks 0, 5 and 31 (spanning both shards)."
     },
     {
-      "name": "qwen3vl_8b_int8_convrot.safetensors",
-      "repo": "Comfy-Org/Qwen-Image-2.1",
-      "path": "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+      "name": "qwen3vl_8b_bf16.safetensors",
       "dest": "text_encoders",
-      "size": 9350798360,
-      "bake": false,
-      "note": "Alternatives from the same repo: qwen3vl_8b_w4a8.safetensors (6312105364), qwen3vl_8b_bf16.safetensors (17534334616)."
+      "repo": "Qwen/Qwen-Image-2.1",
+      "sources": [
+        "text_encoder/model-00001-of-00004.safetensors",
+        "text_encoder/model-00002-of-00004.safetensors",
+        "text_encoder/model-00003-of-00004.safetensors",
+        "text_encoder/model-00004-of-00004.safetensors"
+      ],
+      "index": {
+        "path": "text_encoder/model.safetensors.index.json",
+        "total_size": 17534247392
+      },
+      "output_bytes": 17534247392,
+      "convert": {
+        "rename": [
+          ["^model\\.language_model\\.", "model."]
+        ],
+        "expect": {
+          "tensors": 750,
+          "dtype": "BF16",
+          "data_bytes": 17534247392,
+          "layout_sha256": "95e02fc9da94edc54a9007bc29a220d106b35f6deee5d012b0ccff214e32bb47"
+        }
+      },
+      "provenance": "The original wraps the language tower as model.language_model.*; ComfyUI's Qwen3-VL loader wants model.*. The rename maps the 750-key source set onto the loader's key set exactly (no keys added, dropped or reshaped)."
+    },
+    {
+      "name": "qwen_image_2.1_vae_fp32.safetensors",
+      "dest": "vae",
+      "repo": "Qwen/Qwen-Image-2.1",
+      "sources": [
+        "vae/diffusion_pytorch_model.safetensors"
+      ],
+      "output_bytes": 1350961616,
+      "convert": {
+        "rename": [
+          ["^encoder\\.conv_in\\.", "encoder.conv1."],
+          ["^decoder\\.conv_in\\.", "decoder.conv1."],
+          ["^quant_conv\\.", "conv1."],
+          ["^post_quant_conv\\.", "conv2."],
+          ["^encoder\\.norm_out\\.", "encoder.head.0."],
+          ["^encoder\\.conv_out\\.", "encoder.head.2."],
+          ["^decoder\\.norm_out\\.", "decoder.head.0."],
+          ["^decoder\\.conv_out\\.", "decoder.head.2."],
+          ["^encoder\\.down_blocks\\.(?P<n>\\d+)\\.downsampler\\.", "encoder.downsamples.${n}.downsamples.2."],
+          ["^decoder\\.up_blocks\\.(?P<n>\\d+)\\.upsampler\\.", "decoder.upsamples.${n}.upsamples.3."],
+          ["^encoder\\.down_blocks\\.(?P<n>\\d+)\\.resnets\\.(?P<m>\\d+)\\.", "encoder.downsamples.${n}.downsamples.${m}."],
+          ["^decoder\\.up_blocks\\.(?P<n>\\d+)\\.resnets\\.(?P<m>\\d+)\\.", "decoder.upsamples.${n}.upsamples.${m}."],
+          ["^encoder\\.mid_block\\.resnets\\.0\\.", "encoder.middle.0."],
+          ["^encoder\\.mid_block\\.resnets\\.1\\.", "encoder.middle.2."],
+          ["^decoder\\.mid_block\\.resnets\\.0\\.", "decoder.middle.0."],
+          ["^decoder\\.mid_block\\.resnets\\.1\\.", "decoder.middle.2."],
+          ["^encoder\\.mid_block\\.attentions\\.0\\.", "encoder.middle.1."],
+          ["^decoder\\.mid_block\\.attentions\\.0\\.", "decoder.middle.1."],
+          ["^(?P<blk>encoder\\.downsamples\\.\\d+\\.downsamples\\.\\d+|decoder\\.upsamples\\.\\d+\\.upsamples\\.\\d+|encoder\\.middle\\.\\d+|decoder\\.middle\\.\\d+)\\.norm1\\.", "${blk}.residual.0."],
+          ["^(?P<blk>encoder\\.downsamples\\.\\d+\\.downsamples\\.\\d+|decoder\\.upsamples\\.\\d+\\.upsamples\\.\\d+|encoder\\.middle\\.\\d+|decoder\\.middle\\.\\d+)\\.conv1\\.", "${blk}.residual.2."],
+          ["^(?P<blk>encoder\\.downsamples\\.\\d+\\.downsamples\\.\\d+|decoder\\.upsamples\\.\\d+\\.upsamples\\.\\d+|encoder\\.middle\\.\\d+|decoder\\.middle\\.\\d+)\\.norm2\\.", "${blk}.residual.3."],
+          ["^(?P<blk>encoder\\.downsamples\\.\\d+\\.downsamples\\.\\d+|decoder\\.upsamples\\.\\d+\\.upsamples\\.\\d+|encoder\\.middle\\.\\d+|decoder\\.middle\\.\\d+)\\.conv2\\.", "${blk}.residual.6."],
+          ["^(?P<blk>encoder\\.downsamples\\.\\d+\\.downsamples\\.\\d+|decoder\\.upsamples\\.\\d+\\.upsamples\\.\\d+|encoder\\.middle\\.\\d+|decoder\\.middle\\.\\d+)\\.conv_shortcut\\.", "${blk}.shortcut."]
+        ],
+        "reshape": [
+          {
+            "pattern": "\\.weight$",
+            "ndim": 4,
+            "exclude": ["middle\\.\\d+\\.(?:to_qkv|proj)\\.weight$", "\\.resample\\.1\\.weight$"],
+            "insert_axis": 2
+          }
+        ],
+        "expect": {
+          "tensors": 238,
+          "dtype": "F32",
+          "data_bytes": 1350961616,
+          "layout_sha256": "5057bb3e10186c77aef7dd6beb7ac410f98b2a5ed250f57675e9a418970319c6"
+        }
+      },
+      "provenance": "ComfyUI loads this VAE as a WanVAE (comfy.ldm.wan.vae2_2, temporal kernel 1, RGBA out), which uses the middle/upsamples/downsamples/head/residual naming and 5D kernels. The original is the same tensors in diffusers naming as 4D (image) kernels. Mapping verified by value on 14 key families: every source element is within 1 ULP of Comfy-Org's bf16 conversion, which is what a bf16 rounding of the fp32 original looks like. Kept in fp32 (the upstream precision), so it is 1.35 GB instead of 0.68 GB."
     }
   ]
 }

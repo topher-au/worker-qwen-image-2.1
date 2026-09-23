@@ -48,16 +48,29 @@ esac
 
 if [ -z "${dest}" ]; then
     dest="${CONTAINER_MODELS_DIR}"
-    log "no network volume at ${VOLUME_PATH}: downloading into ${dest}"
+    log "no network volume at ${VOLUME_PATH}: fetching and converting into ${dest}"
     log "note: that is the container's writable layer, so this repeats on every cold"
     log "note: start and needs a container disk of 40 GB. Attach a network volume instead."
 else
     log "model storage: ${dest}"
 fi
 
-if [ -d "${VOLUME_PATH}/huggingface-cache" ]; then
-    log "found a RunPod model cache at ${VOLUME_PATH}/huggingface-cache - files staged there"
-    log "are reused instead of downloaded (MODEL_CACHE_MODE=${MODEL_CACHE_MODE:-link})"
+# RunPod's cached models (and any HF cache on the host) are read in place, which
+# is what turns the first start into a local disk-to-disk conversion.
+cache_seen=""
+for cache_root in "${MODEL_HF_CACHE_ROOT:-}" "${HF_CACHE_ROOT:-}" "${HUGGINGFACE_HUB_CACHE:-}" \
+                  "${HF_HOME:+${HF_HOME}/hub}" "${VOLUME_PATH}/huggingface-cache/hub" \
+                  "${VOLUME_PATH}/huggingface-cache" /root/.cache/huggingface/hub; do
+    [ -n "${cache_root}" ] || continue
+    if [ -d "${cache_root}" ]; then
+        log "model cache present: ${cache_root} (staged repos are read in place)"
+        cache_seen="yes"
+    fi
+done
+if [ -z "${cache_seen}" ]; then
+    log "no model cache found: the 33 GB of Qwen/Qwen-Image-2.1 shards will be downloaded."
+    log "set the endpoint's cached model to Qwen/Qwen-Image-2.1 to avoid that download"
+    log "(MODEL_CACHE_MODE=${MODEL_CACHE_MODE:-link})"
 fi
 
 mkdir -p "${dest}"
